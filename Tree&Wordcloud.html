@@ -1,0 +1,471 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Interactive Node Tree with Zoom</title>
+    
+    <link href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css" rel="stylesheet">
+<script src="{{ url_for('static', filename='d3/d3.min.js') }}"></script>
+<script src="{{ url_for('static', filename='d3/d3.layout.cloud.js') }}"></script>
+
+    <style>
+        .node {
+            cursor: pointer;
+        }
+        
+        .node circle {
+            fill: #F3F3F3; 
+            stroke: #6A0DAD; 
+            stroke-width: 2.5px;
+        }
+        
+        .node text {
+            font-size: 12px; 
+            fill: #C80000; 
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; 
+            transition: transform 0.3s ease-in-out;
+        }
+        .node:hover text {
+            transform: scale(1.5); /* Zoom effect on hover */
+        }
+        
+        .link {
+            fill: none;
+            stroke: #8A2BE2; /* Blue violet */
+            stroke-width: 2px; /* Adjust link width */
+        }
+        
+
+        .word-cloud {
+            position: absolute;
+            display: none;
+            border: 1px solid #ccc;
+            background-color: #fff;
+            padding: 10px;
+            z-index: 1000;
+        }
+        .word-cloud-container {
+            width: 100%;
+            height: 80vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .word-cloud-svg text {
+            cursor: pointer;
+            transition: transform 0.3s ease-in-out;
+        }
+
+        .word-cloud-svg text:hover {
+            transform: scale(1.5);
+        }
+        @keyframes moveText {
+            0% {
+              transform: translateX(0);
+            }
+            50% {
+              transform: translateX(50px);
+            }
+            100% {
+              transform: translateX(0);
+            }
+          }
+      
+          .moving-text {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            animation: moveText 5s infinite;
+          }
+          .dropdown-container {
+            margin-top: 20px;
+        }
+
+        .dropdown-container select {
+            border-radius: 5px;
+            padding: 8px;
+            width: 100%;
+        }
+
+        .dropdown-container label {
+            font-family: 'Roboto', sans-serif;
+            font-weight: 700;
+            margin-bottom: 5px;
+            display: block;
+            color: #6c757d;
+        }
+    
+    </style>
+</head>
+<body style="background-image: url('../static/paper-texture-background.jpg');">
+    <div class="container mt-5">
+        <h1 class="text-center text-primary moving-text" style="font-family: 'Roboto', sans-serif;">Intelligent DashBoard</h1>
+    </div>
+    
+       
+    <div class="container dropdown-container">
+        <div class="row justify-content-center">
+            <div class="col-md-4">
+                <label for="year-dropdown">Select Year:</label>
+                <select id="year-dropdown" class="form-control">
+                    <option disabled selected>Year</option>
+                    <!-- Add options dynamically via JavaScript -->
+                </select>
+            </div>
+            <div class="col-md-4">
+                <label for="genre-dropdown">Select Genre:</label>
+                <select id="genre-dropdown" class="form-control">
+                    <option disabled selected>Genre</option>
+                    <!-- Add options dynamically via JavaScript -->
+                </select>
+            </div>
+        </div>
+    </div>
+    
+    <svg width="1500" height="1200">
+        <!-- <image href="temp.jpg" width="100%" height="100%" /> -->
+    </svg>   
+    
+
+    <!-- Word cloud container -->
+    <div class="word-cloud"></div>
+    <div class="back-button" style="display: none; position: absolute; top: 20px; left: 20px;">
+        <button onclick="returnToTree()" class="btn btn-primary">Back to Tree</button>
+    </div>
+    <div class="container mt-3"> <!-- Added margin-top for space -->
+        <div class="row">
+            <div class="col">
+                <div class="bubble-chart"></div>
+            </div>
+        </div>
+    </div>
+    
+    
+
+    <!-- <script src="d3.min.js"></script> -->
+    <script>
+        
+        
+        const svg = d3.select("svg");
+        const g = svg.append("g").attr("transform", "translate(80, 40)");
+        const wordCloudContainer = document.querySelector('.word-cloud');
+
+        const yearDropdown = d3.select("#year-dropdown");
+        const genreDropdown = d3.select("#genre-dropdown");
+
+        async function fetchData() {
+            try {
+                const response = await fetch('/static/2.json'); // Replace '2.json' with your actual JSON file path
+                const jsonData = await response.json();
+                const years = Object.keys(jsonData);
+
+                yearDropdown
+                    .selectAll("option")
+                    .data(years)
+                    .enter()
+                    .append("option")
+                    .text(d => d)
+                    .attr("value", d => d);
+
+                yearDropdown.on("change", function() {
+                    const selectedYear = this.value;
+                    const selectedData = jsonData[selectedYear];
+                    const genres = Object.keys(selectedData);
+
+                    genreDropdown.selectAll("option").remove();
+                    genreDropdown.append("option")
+                        .text("Select a genre")
+                        .attr("disabled", true)
+                        .attr("selected", true);
+
+                    genreDropdown
+                        .selectAll("option")
+                        .data(genres)
+                        .enter()
+                        .append("option")
+                        .text(d => d)
+                        .attr("value", d => d);
+                });
+
+                genreDropdown.on("change", function() {
+                    const selectedYear = yearDropdown.node().value;
+                    const selectedGenre = this.value;
+                    const selectedData = jsonData[selectedYear];
+
+                    const selectedMovies = selectedData[selectedGenre].map(movie => ({
+                        name: movie.movie_name,
+                        // Assuming each movie has 'utterances' property containing an array of strings
+                        utterances: movie.utterances || [] 
+                    }));
+
+                    const updatedTreeData = {
+                        name: `${selectedYear}-${selectedGenre}`,
+                        children: selectedMovies
+                    };
+
+                    updateTree(updatedTreeData);
+                    
+                });
+            } catch (error) {
+                console.error('Error fetching data:', error);
+            }
+        }
+const animationSvg = d3.select("body")
+    .append("svg")
+    .attr("width", 800)
+    .attr("height", 600)
+    .style("display", "none");
+        fetchData();
+        function showWordCloud(utterances) {
+            wordCloudContainer.innerHTML = ''; // Clear previous content
+        
+            const words = [];
+            utterances.forEach(sentence => {
+                const sentenceWords = sentence.split(/\s+/);
+                words.push(...sentenceWords);
+            });
+        
+            const wordCount = {};
+            words.forEach(word => {
+                wordCount[word] = (wordCount[word] || 0) + 1;
+            });
+        
+            const wordCountArray = Object.keys(wordCount).map(word => ({
+                text: word,
+                size: wordCount[word]
+            }));
+        
+            const width = 1500;
+            const height = 500;
+        
+            const layout = d3.layout.cloud()
+                .size([width, height])
+                .words(wordCountArray)
+                .padding(5) // Adjust padding between words
+                .rotate(d => (Math.random() < 0.5 ? -45 : 45)) // Rotate words randomly left (-45) or right (45)
+                .fontSize(d => d.size * 20) // Font size based on word frequency
+                .on("end", draw);
+        
+            layout.start();
+        
+            function draw(words) {
+                const wordCloudSvg = d3.select(wordCloudContainer)
+                    .append("svg")
+                    .attr("width", width)
+                    .attr("height", height)
+                    .append("g")
+                    .attr("transform", `translate(${width / 2},${height / 2})`);
+        
+                wordCloudSvg.selectAll("text")
+                    .data(words)
+                    .enter().append("text")
+                    .style("font-size", d => `${d.size}px`)
+                    .style("font-family", "Arial, sans-serif") // Set desired font family
+                    .style("fill", (d, i) => `rgb(${i * 5},${i * 20},${i * 30})`) // Use a color gradient or scheme excluding white
+                    .attr("text-anchor", "middle")
+                    .attr("transform", d => `translate(${d.x},${d.y})rotate(${d.rotate})`)
+                    .text(d => d.text)
+                    .style("opacity", 0) // For transition effect
+                    .transition()
+                    .duration(800)
+                    .style("opacity", 1);
+            }
+        }
+        
+        
+        function returnToTree() {
+            // Hide animation SVG
+            animationSvg.transition().duration(1000).style("opacity", 0);
+        
+            // Show tree SVG
+            svg.style("display", "block").transition().delay(1000).duration(1000).style("opacity", 1);
+        
+            // Show word cloud container
+            wordCloudContainer.style.display = 'none';
+        
+            // Hide back button
+            document.querySelector('.back-button').style.display = 'none';
+        }
+        
+
+        
+        function showBubbleChart(utterances) {
+            const bubbleContainer = document.querySelector('.bubble-chart');
+            bubbleContainer.innerHTML = ''; // Clear previous content
+        
+            // Logic to create the bubble chart from 'utterances' array
+            const words = [];
+            utterances.forEach(sentence => {
+                const sentenceWords = sentence.split(/\s+/); // Split sentence into words
+                words.push(...sentenceWords); // Add words to the 'words' array
+            });
+        
+            // Count occurrences of each word
+            const wordCount = {};
+            words.forEach(word => {
+                wordCount[word] = (wordCount[word] || 0) + 1;
+            });
+        
+            // Convert wordCount object into an array of objects for bubble chart
+            const wordCountArray = Object.keys(wordCount).map(word => ({
+                word: word,
+                count: wordCount[word]
+            }));
+        
+            // Sort words by their counts in descending order
+            wordCountArray.sort((a, b) => b.count - a.count);
+        
+            // Create bubble chart with circles representing word occurrences
+            const bubbleSvg = d3.select(bubbleContainer)
+                .append("svg")
+                .attr("width", 1500)
+                .attr("height", 1200);
+        
+            const bubbles = bubbleSvg.selectAll("circle")
+                .data(wordCountArray)
+                .enter()
+                .append("circle")
+                .attr("cx", () => Math.random() * 1200) // Random X position within SVG
+                .attr("cy", () => Math.random() * 1200) // Random Y position within SVG
+                .attr("r", d => d.count * 2) // Scale circle radius based on word count
+                .style("fill", () => `rgb(${Math.random() * 255},${Math.random() * 255},${Math.random() * 255})`) // Random color
+        
+                .on("mouseover", function (event, d) {
+                    // Zoom effect by changing circle size on hover
+                    const hoveredCircle = d3.select(this);
+                    const currentRadius = parseFloat(hoveredCircle.attr("r"));
+                    hoveredCircle.transition().attr("r", currentRadius * 1.5);
+        
+                    // Show count of occurrences with random color
+                    const wordCountText = bubbleSvg.append("text")
+                        .attr("x", parseFloat(hoveredCircle.attr("cx")))
+                        .attr("y", parseFloat(hoveredCircle.attr("cy")) + 20)
+                        .attr("text-anchor", "middle")
+                        .text(`Occurrences: ${d.count}`)
+                        .style("font-size", "14px")
+                        .style("fill", `rgb(${Math.random() * 255},${Math.random() * 255},${Math.random() * 255})`);
+        
+                    // Show word on bubble in black color, bold
+                    const wordText = bubbleSvg.append("text")
+                        .attr("x", parseFloat(hoveredCircle.attr("cx")))
+                        .attr("y", parseFloat(hoveredCircle.attr("cy")))
+                        .attr("text-anchor", "middle")
+                        .text(d.word)
+                        .style("font-size", "14px")
+                        .style("fill", "black")
+                        .style("font-weight", "bold");
+        
+                    // Zoom effect for count text
+                    const countFontSize = parseFloat(wordCountText.style("font-size"));
+                    wordCountText.transition().style("font-size", countFontSize * 1.5 + "px");
+        
+                    // Remove elements after hovering out
+                    hoveredCircle.on("mouseout", function () {
+                        hoveredCircle.transition().attr("r", d.count * 2);
+                        wordCountText.remove();
+                        wordText.remove();
+                    });
+                });
+        }
+        
+        
+       
+
+        
+        
+        
+        
+        
+        
+
+        function updateTree(data) {
+            
+            const treeLayout = d3.tree().size([800, 800]); 
+        
+            const root = d3.hierarchy(data);
+            const tree = treeLayout(root);
+        
+            svg.selectAll(".link").remove();
+            svg.selectAll(".node").remove();
+        
+            const links = g
+                .selectAll(".link")
+                .data(tree.links())
+                .enter()
+                .append("path")
+                .attr("class", "link")
+                .attr("d", d3.linkHorizontal().x(d => d.y).y(d => d.x));
+        
+            const nodes = g
+                .selectAll(".node")
+                .data(tree.descendants())
+                .enter()
+                .append("g")
+                .attr("class", "node")
+                .attr("transform", d => `translate(${d.y},${d.x})`);
+
+                // Function to handle node click events
+function handleNodeClick(event, d) {
+    if (d.data.utterances && d.data.utterances.length > 0) {
+        showWordCloud(d.data.utterances);
+        showBubbleChart(d.data.utterances);
+        wordCloudContainer.style.display = 'block';
+
+        // Hide the tree SVG and show the animation SVG
+        svg.style("display", "none");
+        animationSvg.style("display", "block");
+
+        // Perform an animated transition from tree to animation
+        svg.transition()
+            .duration(2000)
+            .style("opacity", 0);
+
+        animationSvg.transition()
+            .delay(2000)
+            .duration(2000)
+            .style("display", "block")
+            .style("opacity", 1);
+    } else {
+        wordCloudContainer.style.display = 'none';
+    }
+
+    animationSvg.style("display", "none").style("opacity", 0);
+    animationSvg.transition().delay(2000).style("opacity", 1);
+    document.querySelector('.back-button').style.display = 'block';
+}
+
+// Attach click event handler to nodes
+        
+            nodes
+                .append("circle")
+                .attr("r", 5)
+                .on("mouseover", function () {
+                    d3.select(this).attr("r", 8);
+                })
+                .on("mouseout", function () {
+                    d3.select(this).attr("r", 5);
+                });               
+                nodes.on("click", handleNodeClick);
+
+                
+
+        
+            nodes
+                .append("text")
+                .attr("dy", 5)
+                .attr("x", d => (d.children ? -5 : 5)) // Adjusted x-value for positioning
+                .style("text-anchor", d => (d.children ? "end" : "start"))
+                .text(d => d.data.name);
+        
+            svg.call(
+                d3.zoom().on("zoom", function () {
+                    g.attr("transform", d3.event.transform);
+                })
+            );
+        }
+        
+    </script>
+    <script src="https://code.jquery.com/jquery-3.5.1.slim.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@popperjs/core@2.9.2/dist/umd/popper.min.js"></script>
+    <script src="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/js/bootstrap.min.js"></script>
+    <!-- <script src="d3.min.js"></script> -->
+</body>
+</html>
